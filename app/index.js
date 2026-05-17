@@ -1,13 +1,23 @@
-import { View, Text, TextInput, StyleSheet, ScrollView, Image, Pressable } from 'react-native';
-import { useState } from 'react';
+import { View, Text, TextInput, StyleSheet, ScrollView, Image, Pressable, Alert } from 'react-native';
+import { useState, useEffect } from 'react';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import DescripcionModal from '../modals/modal';
+
+import { guardarFactura } from '../services/facturasService';
+import * as Sharing from 'expo-sharing';
+import { File, Paths } from 'expo-file-system';
+
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 
 export default function FacturaScreen() {
 
+    const [cliente, setCliente] = useState('');
     const [modalVisible, setModalVisible] = useState(false);
     const [filaSeleccionada, setFilaSeleccionada] = useState(null);
+
+    const [numeroRecibo, setNumeroRecibo] = useState('0788');
+
     const [filas, setFilas] = useState(
         Array.from({ length: 14 }).map(() => ({
             cantidad: '',
@@ -49,6 +59,96 @@ export default function FacturaScreen() {
         }
     };
 
+    const totalGeneral = filas
+        .reduce((total, fila) => {
+            const valor = parseFloat(fila.total) || 0;
+            return total + valor;
+        }, 0)
+        .toFixed(2);
+
+
+    const guardarFacturaActual = async () => {
+        try {
+
+            const factura = {
+                cliente,
+                fecha: {
+                    dia,
+                    mes,
+                    anio,
+                },
+                filas,
+                total: totalGeneral,
+            };
+
+            const facturaGuardada = await guardarFactura(factura);
+
+            setNumeroRecibo(
+                String(facturaGuardada.numeroRecibo + 1).padStart(4, '0')
+            );
+
+            Alert.alert('Listo', 'Factura guardada correctamente');
+
+            setTimeout(() => {
+                setCliente('');
+
+                setFilas(
+                    Array.from({ length: 14 }).map(() => ({
+                        cantidad: '',
+                        referencia: '',
+                        descripcion: '',
+                        precio: '',
+                        total: '',
+                    }))
+                );
+
+                setFecha(new Date());
+
+            }, 60000);
+        } catch (error) {
+            Alert.alert('Error', 'No se pudo guardar la factura');
+        }
+    };
+
+    const compartirFactura = async () => {
+        try {
+            const contenido = `
+                FACTURA
+
+                Cliente: ${cliente}
+
+                Fecha: ${dia}/${mes}/${anio}
+
+                Productos:
+                ${filas
+                    .filter((fila) => fila.descripcion)
+                    .map(
+                        (fila, index) =>
+                            `${index + 1}. Cant: ${fila.cantidad} | ${fila.descripcion} | Total: $${fila.total}`
+                    )
+                    .join('\n')}
+
+                TOTAL: $${totalGeneral}
+                `;
+
+            const file = new File(Paths.cache, `factura-${Date.now()}.txt`);
+            file.create();
+            file.write(contenido);
+
+            const disponible = await Sharing.isAvailableAsync();
+
+            if (!disponible) {
+                Alert.alert('Aviso', 'Compartir no está disponible');
+                return;
+            }
+
+            await Sharing.shareAsync(file.uri);
+        } catch (error) {
+            console.log(error);
+            Alert.alert('Error', 'No se pudo compartir la factura');
+        }
+    };
+
     return (
         <ScrollView style={styles.screen}>
             <View style={styles.receipt}>
@@ -69,7 +169,12 @@ export default function FacturaScreen() {
 
                     <View style={styles.rightHeader}>
                         <Text style={styles.recibo}>RECIBO</Text>
-                        <Text style={styles.numero}>0783</Text>
+                        <TextInput
+                            style={styles.numero}
+                            value={numeroRecibo}
+                            onChangeText={setNumeroRecibo}
+                            keyboardType="numeric"
+                        />
 
                         <Text style={styles.fechaTitle}>FECHA</Text>
 
@@ -110,7 +215,9 @@ export default function FacturaScreen() {
                 {/* CLIENTE */}
                 <View style={styles.clientRow}>
                     <Text style={styles.clientLabel}>CLIENTE</Text>
-                    <TextInput style={styles.clientInput} />
+                    <TextInput style={styles.clientInput}
+                        value={cliente}
+                        onChangeText={setCliente} />
                 </View>
 
                 {/* TABLA */}
@@ -189,7 +296,7 @@ export default function FacturaScreen() {
 
                     <View style={styles.totalBox}>
                         <Text style={styles.totalLabel}>TOTAL</Text>
-                        <TextInput style={styles.finalTotal} />
+                        <TextInput style={styles.finalTotal} value={`$${totalGeneral}`} editable={false} />
                     </View>
                 </View>
 
@@ -199,6 +306,25 @@ export default function FacturaScreen() {
                     onSave={guardarDescripcion}
                 />
 
+            </View>
+            <View style={styles.actions}>
+                <Pressable
+                    style={styles.saveInvoiceButton}
+                    onPress={guardarFacturaActual}
+                >
+                    <Text style={styles.saveInvoiceText}>
+                        Guardar factura
+                    </Text>
+                </Pressable>
+
+                <Pressable
+                    style={styles.shareInvoiceButton}
+                    onPress={compartirFactura}
+                >
+                    <Text style={styles.shareInvoiceText}>
+                        Compartir factura
+                    </Text>
+                </Pressable>
             </View>
         </ScrollView>
     );
@@ -211,6 +337,7 @@ const styles = StyleSheet.create({
 
     descText: {
         fontSize: 9,
+        lineHeight: 12,
     },
 
     receipt: {
@@ -220,6 +347,9 @@ const styles = StyleSheet.create({
         alignSelf: 'center',
         marginTop: 20,
         padding: 14,
+        borderWidth: 1,
+        borderColor: '#cfcfcf',
+        elevation: 3,
     },
 
     top: {
@@ -232,9 +362,10 @@ const styles = StyleSheet.create({
     },
 
     logo: {
-        width: 250,
-        height: 105,
+        width: 290,
+        height: 125,
         alignSelf: 'flex-start',
+        marginLeft: -8,
     },
 
     address: {
@@ -249,27 +380,38 @@ const styles = StyleSheet.create({
     },
 
     recibo: {
-        borderWidth: 1,
-        width: 95,
+        backgroundColor: '#0b376b',
+        width: 110,
+        height: 28,
         textAlign: 'center',
-        fontSize: 15,
+        color: '#fff',
         fontWeight: 'bold',
-        color: '#0b376b',
+        fontSize: 16,
+        paddingTop: 4,
+        borderTopLeftRadius: 4,
+        borderTopRightRadius: 4,
     },
 
     numero: {
         borderWidth: 1,
+        borderColor: '#0b376b',
         borderTopWidth: 0,
-        width: 95,
+        width: 110,
+        height: 42,
         textAlign: 'center',
-        fontSize: 25,
+        fontSize: 28,
         color: '#d85c42',
+        fontWeight: 'bold',
+        paddingTop: 2,
     },
 
     fechaTitle: {
-        marginTop: 6,
+        marginTop: 8,
+        marginBottom: 2,
         fontWeight: 'bold',
         color: '#0b376b',
+        fontSize: 13,
+        letterSpacing: 1,
     },
 
     dateRow: {
@@ -278,13 +420,18 @@ const styles = StyleSheet.create({
 
     dateBox: {
         borderWidth: 1,
+        borderColor: '#0b376b',
         width: 38,
+        backgroundColor: '#f7f7f7',
     },
 
     dateLabel: {
-        fontSize: 11,
+        fontSize: 10,
         textAlign: 'center',
         fontWeight: 'bold',
+        backgroundColor: '#0b376b',
+        color: '#fff',
+        paddingVertical: 1,
     },
 
     dateText: {
@@ -341,7 +488,7 @@ const styles = StyleSheet.create({
 
     tableRow: {
         flexDirection: 'row',
-        height: 32,
+        minHeight: 34,
     },
 
     th: {
@@ -374,11 +521,11 @@ const styles = StyleSheet.create({
     },
 
     price: {
-        width: 60,
+        width: 46.5,
     },
 
     total: {
-        width: 60,
+        width: 46.5,
     },
 
     bottom: {
@@ -412,12 +559,50 @@ const styles = StyleSheet.create({
         paddingTop: 7,
         fontWeight: 'bold',
         color: '#0b376b',
-        fontSize: 18,
+        fontSize: 14,
     },
 
     finalTotal: {
         width: 90,
-        fontSize: 18,
+        fontSize: 12,
         padding: 2,
+    },
+
+    saveInvoiceButton: {
+        backgroundColor: '#0b376b',
+        padding: 14,
+        borderRadius: 8,
+        marginTop: 18,
+        marginBottom: 35,
+    },
+
+    saveInvoiceText: {
+        color: '#fff',
+        fontWeight: 'bold',
+        textAlign: 'center',
+        fontSize: 16,
+    },
+
+    shareInvoiceButton: {
+        backgroundColor: '#d85c42',
+        padding: 14,
+        borderRadius: 8,
+        marginTop: 10,
+        marginBottom: 35,
+    },
+
+    shareInvoiceText: {
+        color: '#fff',
+        fontWeight: 'bold',
+        textAlign: 'center',
+        fontSize: 16,
+    },
+
+    actions: {
+        width: 430,
+        alignSelf: 'center',
+        marginTop: 12,
+        marginBottom: 30,
+        gap: 10,
     },
 });
