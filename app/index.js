@@ -16,8 +16,12 @@ import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system/legacy';
 
 import DescripcionModal from '../modals/DescripcionModalV2';
-import { guardarFactura } from '../services/facturasService';
-import { generarPdfFactura } from '../services/pdfService';
+import {
+    guardarFactura,
+    actualizarFactura,
+    obtenerFacturas,
+} from '../services/facturasService';
+import { generarPdfFactura, subirPdfFactura } from '../services/pdfService';
 
 import * as Sharing from 'expo-sharing';
 import { File, Paths } from 'expo-file-system';
@@ -25,7 +29,6 @@ import { File, Paths } from 'expo-file-system';
 import { useFocusEffect } from 'expo-router';
 import { useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { obtenerFacturas } from '../services/facturasService';
 
 
 export default function FacturaScreen() {
@@ -45,6 +48,9 @@ export default function FacturaScreen() {
 
     const [toastVisible, setToastVisible] = useState(false);
     const [toastMessage, setToastMessage] = useState('');
+
+    const [modoEdicion, setModoEdicion] = useState(false);
+    const [facturaEditandoId, setFacturaEditandoId] = useState(null);
 
     const crearFilasVacias = () =>
         Array.from({ length: 14 }).map(() => ({
@@ -139,6 +145,7 @@ export default function FacturaScreen() {
     };
 
     const crearFacturaActual = () => ({
+        id: facturaEditandoId || undefined,
         numeroRecibo,
         cliente,
         fecha: {
@@ -167,9 +174,50 @@ export default function FacturaScreen() {
 
     const guardarFacturaActual = async () => {
         try {
-            const factura = crearFacturaActual();
+            let factura = crearFacturaActual();
 
-            const facturaGuardada = await guardarFactura(factura);
+            let pdfUrl = null;
+
+            try {
+                const logoBase64 = await obtenerLogoBase64();
+
+                const resultadoPdf = await subirPdfFactura(factura, logoBase64);
+
+                if (resultadoPdf?.subida) {
+                    pdfUrl = resultadoPdf.pdfUrl;
+                }
+            } catch (errorPdf) {
+                console.log('No se pudo subir PDF:', errorPdf.message);
+            }
+
+            factura = {
+                ...factura,
+                pdfUrl,
+            };
+
+            let facturaGuardada = null;
+
+            if (modoEdicion && facturaEditandoId) {
+                facturaGuardada = await actualizarFactura(
+                    facturaEditandoId,
+                    factura
+                );
+
+                mostrarToast('Factura actualizada correctamente');
+
+                setModoEdicion(false);
+                setFacturaEditandoId(null);
+
+                await AsyncStorage.removeItem('modo_edicion_factura');
+            } else {
+                facturaGuardada = await guardarFactura(factura);
+
+                if (pdfUrl) {
+                    mostrarToast('Factura guardada con PDF en la nube');
+                } else {
+                    mostrarToast('Factura guardada, PDF pendiente de subir');
+                }
+            }
 
             if (facturaGuardada?.numeroRecibo) {
                 setNumeroRecibo(
@@ -177,9 +225,6 @@ export default function FacturaScreen() {
                 );
             }
 
-            mostrarToast('Factura guardada correctamente');
-
-            //limpiarFactura();
         } catch (error) {
             console.log(error);
             mostrarToast('No se pudo guardar la factura');
@@ -275,13 +320,20 @@ TOTAL: $${totalGeneral}
 
     const cargarFacturaParaEditar = async () => {
         const idEditar = await AsyncStorage.getItem('factura_editar_id');
+        const modoEdicionGuardado =
+            await AsyncStorage.getItem('modo_edicion_factura');
 
+        if (modoEdicionGuardado === 'true') {
+            setModoEdicion(true);
+        }
         if (!idEditar) return;
 
         const facturasGuardadas = await obtenerFacturas();
         const factura = facturasGuardadas.find((item) => item.id === idEditar);
 
         if (!factura) return;
+
+        setFacturaEditandoId(factura.id);
 
         setNumeroRecibo(String(factura.numeroRecibo || ''));
         setCliente(factura.cliente || '');
