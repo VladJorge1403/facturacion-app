@@ -28,7 +28,7 @@ export default function FacturasGuardadas() {
     const [modalEliminar, setModalEliminar] = useState(false);
     const [facturaEliminar, setFacturaEliminar] = useState(null);
 
-    const { height } = useWindowDimensions();
+    //const { height } = useWindowDimensions();
 
     useFocusEffect(
         useCallback(() => {
@@ -47,6 +47,7 @@ export default function FacturasGuardadas() {
 
     const editarFactura = async (factura) => {
         await AsyncStorage.setItem('factura_editar_id', factura.id);
+        await AsyncStorage.setItem('modo_edicion_factura', 'true');
         router.push('/');
     };
 
