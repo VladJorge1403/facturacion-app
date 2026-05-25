@@ -1,224 +1,444 @@
-import { useEffect, useState } from 'react';
+import { useState, useCallback } from 'react';
 import {
-    View,
-    Text,
-    TextInput,
-    StyleSheet,
-    ScrollView,
-    Pressable,
-    Alert,
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  useWindowDimensions,
+  Modal,
 } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
+import { Ionicons, Feather } from '@expo/vector-icons';
 
-import { guardarPrecios, obtenerPrecios } from '../services/preciosService';
+import { obtenerPrecios, guardarPrecios } from '../services/preciosService';
+
+const PRIMARY = '#1479B8';
+const TEXT = '#18384F';
+const MUTED = '#6F8CA3';
+const BG = '#F4F7FB';
+const DANGER = '#E04F5F';
 
 export default function AdminPrecios() {
-    const [precios, setPrecios] = useState({
-        vidrioClaro: '',
-        vidrioBronce: '',
-        vidrioReflectivo: '',
-        vidrioTemplado: '',
-        aluminioBlanco: '',
-        aluminioNegro: '',
-        ventana: '',
-        vidrioFijo: '',
-        vitrina: '',
-        puerta: '',
-        instalacion: '',
-        transporte: '',
-        ganancia: '',
-    });
+  const [productos, setProductos] = useState([]);
+  const [modalEliminar, setModalEliminar] = useState(false);
+  const [productoAEliminar, setProductoAEliminar] = useState(null);
 
-    useEffect(() => {
-        cargarPrecios();
-    }, []);
+  const { width } = useWindowDimensions();
+  const cardWidth = width >= 700 ? '31%' : '100%';
 
-    const cargarPrecios = async () => {
-        const preciosGuardados = await obtenerPrecios();
+  const cargarProductos = async () => {
+    const data = await obtenerPrecios();
+    setProductos(Array.isArray(data) ? data : []);
+  };
 
-        if (preciosGuardados) {
-            setPrecios(preciosGuardados);
-        }
-    };
+  useFocusEffect(
+    useCallback(() => {
+      cargarProductos();
+    }, [])
+  );
 
-    const cambiarPrecio = (campo, valor) => {
-        setPrecios({
-            ...precios,
-            [campo]: valor,
-        });
-    };
+  const calcularExtras = (item) => {
+    const extras = item.costosAdicionales || [];
 
-    const guardar = async () => {
-        try {
-            await guardarPrecios(precios);
-            Alert.alert('Listo', 'Precios guardados correctamente');
-        } catch (error) {
-            Alert.alert('Error', 'No se pudieron guardar los precios');
-        }
-    };
+    return extras.reduce((total, extra) => {
+      return total + Number(extra.precio || 0);
+    }, 0);
+  };
 
-    return (
-        <ScrollView style={styles.container}>
-            <Text style={styles.title}>Administración de precios</Text>
+  const calcularPrecioTotal = (item) => {
+    const base = Number(item.precioBase || 0);
+    const extras = calcularExtras(item);
 
-            <Text style={styles.section}>Vidrios</Text>
+    return base + extras;
+  };
 
-            <TextInput
-                style={styles.input}
-                placeholder="Vidrio claro 5mm"
-                keyboardType="numeric"
-                value={precios.vidrioClaro}
-                onChangeText={(text) => cambiarPrecio('vidrioClaro', text)}
-            />
+  const abrirModalEliminar = (id) => {
+    setProductoAEliminar(id);
+    setModalEliminar(true);
+  };
 
-            <TextInput
-                style={styles.input}
-                placeholder="Vidrio bronce"
-                keyboardType="numeric"
-                value={precios.vidrioBronce}
-                onChangeText={(text) => cambiarPrecio('vidrioBronce', text)}
-            />
+  const cancelarEliminar = () => {
+    setProductoAEliminar(null);
+    setModalEliminar(false);
+  };
 
-            <TextInput
-                style={styles.input}
-                placeholder="Vidrio reflectivo"
-                keyboardType="numeric"
-                value={precios.vidrioReflectivo}
-                onChangeText={(text) => cambiarPrecio('vidrioReflectivo', text)}
-            />
-
-            <TextInput
-                style={styles.input}
-                placeholder="Vidrio templado"
-                keyboardType="numeric"
-                value={precios.vidrioTemplado}
-                onChangeText={(text) => cambiarPrecio('vidrioTemplado', text)}
-            />
-
-            <Text style={styles.section}>Aluminio</Text>
-
-            <TextInput
-                style={styles.input}
-                placeholder="Aluminio blanco"
-                keyboardType="numeric"
-                value={precios.aluminioBlanco}
-                onChangeText={(text) => cambiarPrecio('aluminioBlanco', text)}
-            />
-
-            <TextInput
-                style={styles.input}
-                placeholder="Aluminio negro"
-                keyboardType="numeric"
-                value={precios.aluminioNegro}
-                onChangeText={(text) => cambiarPrecio('aluminioNegro', text)}
-            />
-
-            <Text style={styles.section}>Productos</Text>
-
-            <TextInput
-                style={styles.input}
-                placeholder="Ventana"
-                keyboardType="numeric"
-                value={precios.ventana}
-                onChangeText={(text) => cambiarPrecio('ventana', text)}
-            />
-
-            <TextInput
-                style={styles.input}
-                placeholder="Vidrio fijo"
-                keyboardType="numeric"
-                value={precios.vidrioFijo}
-                onChangeText={(text) => cambiarPrecio('vidrioFijo', text)}
-            />
-
-            <TextInput
-                style={styles.input}
-                placeholder="Vitrina"
-                keyboardType="numeric"
-                value={precios.vitrina}
-                onChangeText={(text) => cambiarPrecio('vitrina', text)}
-            />
-
-            <TextInput
-                style={styles.input}
-                placeholder="Puerta"
-                keyboardType="numeric"
-                value={precios.puerta}
-                onChangeText={(text) => cambiarPrecio('puerta', text)}
-            />
-
-            <Text style={styles.section}>Extras</Text>
-
-            <TextInput
-                style={styles.input}
-                placeholder="Instalación"
-                keyboardType="numeric"
-                value={precios.instalacion}
-                onChangeText={(text) => cambiarPrecio('instalacion', text)}
-            />
-
-            <TextInput
-                style={styles.input}
-                placeholder="Transporte"
-                keyboardType="numeric"
-                value={precios.transporte}
-                onChangeText={(text) => cambiarPrecio('transporte', text)}
-            />
-
-            <TextInput
-                style={styles.input}
-                placeholder="Ganancia %"
-                keyboardType="numeric"
-                value={precios.ganancia}
-                onChangeText={(text) => cambiarPrecio('ganancia', text)}
-            />
-
-            <Pressable style={styles.button} onPress={guardar}>
-                <Text style={styles.buttonText}>Guardar precios</Text>
-            </Pressable>
-        </ScrollView>
+  const confirmarEliminar = async () => {
+    const nuevaLista = productos.filter(
+      (item) => item.id !== productoAEliminar
     );
+
+    await guardarPrecios(nuevaLista);
+
+    setProductos(nuevaLista);
+    setProductoAEliminar(null);
+    setModalEliminar(false);
+  };
+
+  return (
+    <View style={styles.screen}>
+      <ScrollView contentContainerStyle={styles.content}>
+        <View style={styles.header}>
+          <Feather name="menu" size={32} color={TEXT} />
+
+          <Text style={styles.title}>Precios fijos</Text>
+
+          <Pressable
+            style={styles.addButton}
+            onPress={() => router.push('/nuevo-producto')}
+          >
+            <Ionicons name="add" size={36} color="#fff" />
+          </Pressable>
+        </View>
+
+        <Pressable
+          style={styles.moreButton}
+          onPress={() => router.push('/nuevo-producto')}
+        >
+          <Text style={styles.moreText}>Agregar más precios</Text>
+          <Ionicons name="add" size={28} color={PRIMARY} />
+        </Pressable>
+
+        <View style={styles.grid}>
+          {productos.map((item) => (
+            <View key={item.id} style={[styles.card, { width: cardWidth }]}>
+              <View style={styles.cardTop}>
+                <Text style={styles.cardTitle}>{item.nombre}</Text>
+
+                <View style={styles.cardActions}>
+                  <Pressable
+                    style={styles.iconButton}
+                    onPress={() =>
+                      router.push(`/editar-producto?id=${item.id}`)
+                    }
+                  >
+                    <Feather name="edit-2" size={21} color={PRIMARY} />
+                  </Pressable>
+
+                  <Pressable
+                    style={styles.iconButton}
+                    onPress={() => abrirModalEliminar(item.id)}
+                  >
+                    <Feather name="trash-2" size={21} color={DANGER} />
+                  </Pressable>
+                </View>
+              </View>
+
+              <View style={styles.line} />
+
+              <Text style={styles.price}>
+                ${calcularPrecioTotal(item).toFixed(2)}
+              </Text>
+
+              <View style={styles.summary}>
+                <Text style={styles.summaryText}>
+                  Base: ${Number(item.precioBase || 0).toFixed(2)}
+                </Text>
+
+                <Text style={styles.summaryText}>
+                  Extras: +${calcularExtras(item).toFixed(2)}
+                </Text>
+              </View>
+
+              {item.costosAdicionales?.length > 0 && (
+                <View style={styles.extraContainer}>
+                  {item.costosAdicionales.map((extra) => (
+                    <View key={extra.id} style={styles.extraRow}>
+                      <Text style={styles.extraName}>{extra.nombre}</Text>
+
+                      <Text style={styles.extraPrice}>
+                        +${Number(extra.precio || 0).toFixed(2)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {!!item.descripcion && (
+                <Text style={styles.description}>{item.descripcion}</Text>
+              )}
+            </View>
+          ))}
+        </View>
+
+        {productos.length === 0 && (
+          <Text style={styles.emptyText}>Aún no hay precios guardados</Text>
+        )}
+      </ScrollView>
+
+      <Modal
+        visible={modalEliminar}
+        transparent
+        animationType="fade"
+        onRequestClose={cancelarEliminar}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <View style={styles.modalIcon}>
+              <Feather name="trash-2" size={34} color={DANGER} />
+            </View>
+
+            <Text style={styles.modalTitle}>Eliminar producto</Text>
+
+            <Text style={styles.modalText}>
+              ¿Seguro que deseas eliminar este producto?
+            </Text>
+
+            <View style={styles.modalActions}>
+              <Pressable
+                style={styles.modalCancel}
+                onPress={cancelarEliminar}
+              >
+                <Text style={styles.modalCancelText}>Cancelar</Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.modalDelete}
+                onPress={confirmarEliminar}
+              >
+                <Text style={styles.modalDeleteText}>Eliminar</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        padding: 15,
-        backgroundColor: '#fff',
-    },
+  screen: {
+    flex: 1,
+    backgroundColor: BG,
+  },
 
-    title: {
-        fontSize: 24,
-        fontWeight: 'bold',
-        marginBottom: 15,
-    },
+  content: {
+    paddingHorizontal: 24,
+    paddingTop: 55,
+    paddingBottom: 110,
+  },
 
-    section: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        marginTop: 15,
-        marginBottom: 8,
-        color: '#0b376b',
-    },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 28,
+  },
 
-    input: {
-        borderWidth: 1,
-        borderColor: '#aaa',
-        borderRadius: 6,
-        padding: 10,
-        marginBottom: 8,
-    },
+  title: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: TEXT,
+  },
 
-    button: {
-        backgroundColor: '#0b376b',
-        padding: 14,
-        borderRadius: 8,
-        marginTop: 20,
-        marginBottom: 35,
-    },
+  addButton: {
+    width: 58,
+    height: 58,
+    borderRadius: 14,
+    backgroundColor: PRIMARY,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
-    buttonText: {
-        color: '#fff',
-        textAlign: 'center',
-        fontWeight: 'bold',
-        fontSize: 16,
-    },
+  moreButton: {
+    alignSelf: 'center',
+    backgroundColor: '#fff',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 22,
+    paddingVertical: 13,
+    borderRadius: 8,
+    marginBottom: 34,
+  },
+
+  moreText: {
+    fontSize: 20,
+    color: MUTED,
+    marginRight: 10,
+    fontWeight: '600',
+  },
+
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginBottom: 22,
+    overflow: 'hidden',
+    paddingBottom: 18,
+  },
+
+  cardTop: {
+    minHeight: 88,
+    padding: 18,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+
+  cardTitle: {
+    flex: 1,
+    fontSize: 23,
+    color: TEXT,
+    fontWeight: '500',
+    marginRight: 10,
+  },
+
+  cardActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+
+  iconButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    backgroundColor: '#F2F5FA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  line: {
+    height: 1,
+    backgroundColor: '#9CB5C8',
+  },
+
+  price: {
+    paddingHorizontal: 18,
+    paddingTop: 14,
+    fontSize: 42,
+    color: TEXT,
+    fontWeight: '400',
+  },
+
+  summary: {
+    paddingHorizontal: 18,
+    marginTop: 6,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+
+  summaryText: {
+    color: MUTED,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  extraContainer: {
+    paddingHorizontal: 18,
+    marginTop: 12,
+  },
+
+  extraRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+
+  extraName: {
+    color: MUTED,
+    fontSize: 15,
+  },
+
+  extraPrice: {
+    color: PRIMARY,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+
+  description: {
+    paddingHorizontal: 18,
+    marginTop: 14,
+    color: MUTED,
+    fontSize: 15,
+    lineHeight: 22,
+  },
+
+  emptyText: {
+    textAlign: 'center',
+    color: MUTED,
+    fontSize: 18,
+    marginTop: 30,
+  },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(12, 26, 38, 0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+
+  modalBox: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    padding: 24,
+    alignItems: 'center',
+  },
+
+  modalIcon: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: '#FCEEEF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+
+  modalTitle: {
+    fontSize: 23,
+    fontWeight: '800',
+    color: TEXT,
+    marginBottom: 8,
+  },
+
+  modalText: {
+    fontSize: 16,
+    color: MUTED,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+
+  modalActions: {
+    flexDirection: 'row',
+    width: '100%',
+    gap: 12,
+  },
+
+  modalCancel: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#D6E0EA',
+    borderRadius: 12,
+    paddingVertical: 14,
+  },
+
+  modalCancelText: {
+    color: MUTED,
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+
+  modalDelete: {
+    flex: 1,
+    backgroundColor: DANGER,
+    borderRadius: 12,
+    paddingVertical: 14,
+  },
+
+  modalDeleteText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
 });
