@@ -9,12 +9,6 @@ export async function obtenerFacturas() {
     return data ? JSON.parse(data) : [];
 }
 
-export const eliminarFactura = async (id) => {
-  const facturas = await obtenerFacturas();
-  const nuevasFacturas = facturas.filter((factura) => factura.id !== id);
-  await AsyncStorage.setItem(FACTURAS_KEY, JSON.stringify(nuevasFacturas));
-};
-
 export async function guardarFactura(factura) {
     const online = await hayInternet();
 
@@ -58,8 +52,6 @@ export async function guardarFactura(factura) {
         FACTURAS_KEY,
         JSON.stringify([facturaLocal, ...facturasActuales])
     );
-
-    
 
     return facturaLocal;
 }
