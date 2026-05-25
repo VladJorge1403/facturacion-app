@@ -1,32 +1,99 @@
-import { View, Text, TextInput, StyleSheet, ScrollView, Image, Pressable, Alert } from 'react-native';
-import { useState, useEffect } from 'react';
+import {
+    View,
+    Text,
+    TextInput,
+    StyleSheet,
+    ScrollView,
+    Image,
+    Pressable,
+    Alert,
+    Platform,
+} from 'react-native';
+import { useState } from 'react';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import DescripcionModal from '../modals/modal';
+import { Ionicons } from '@expo/vector-icons';
+import { Asset } from 'expo-asset';
+import * as FileSystem from 'expo-file-system/legacy';
 
+import DescripcionModal from '../modals/DescripcionModalV2';
 import { guardarFactura } from '../services/facturasService';
+import { generarPdfFactura } from '../services/pdfService';
+
 import * as Sharing from 'expo-sharing';
 import { File, Paths } from 'expo-file-system';
 
+import { useFocusEffect } from 'expo-router';
+import { useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { obtenerFacturas } from '../services/facturasService';
 
 
 export default function FacturaScreen() {
-
     const [cliente, setCliente] = useState('');
     const [modalVisible, setModalVisible] = useState(false);
     const [filaSeleccionada, setFilaSeleccionada] = useState(null);
-
     const [numeroRecibo, setNumeroRecibo] = useState('0788');
 
-    const [filas, setFilas] = useState(
+    const [aplicarEnvio, setAplicarEnvio] = useState(false);
+    const [envio, setEnvio] = useState('');
+
+    const [aplicarInstalacion, setAplicarInstalacion] = useState(false);
+    const [instalacion, setInstalacion] = useState('');
+
+    const [aplicarDescuento, setAplicarDescuento] = useState(false);
+    const [descuento, setDescuento] = useState('');
+
+    const [toastVisible, setToastVisible] = useState(false);
+    const [toastMessage, setToastMessage] = useState('');
+
+    const crearFilasVacias = () =>
         Array.from({ length: 14 }).map(() => ({
             cantidad: '',
             referencia: '',
             descripcion: '',
             precio: '',
             total: '',
-        }))
-    );
+            producto: null,
+            extrasSeleccionados: [],
+            medidas: null,
+        }));
+
+    const [filas, setFilas] = useState(crearFilasVacias());
+
+    const [fecha, setFecha] = useState(new Date());
+    const [mostrarCalendario, setMostrarCalendario] = useState(false);
+
+    const dia = String(fecha.getDate()).padStart(2, '0');
+    const mes = String(fecha.getMonth() + 1).padStart(2, '0');
+    const anio = String(fecha.getFullYear());
+
+    const subtotalProductos = filas.reduce((total, fila) => {
+        return total + (parseFloat(fila.total) || 0);
+    }, 0);
+
+    const envioValor = aplicarEnvio ? parseFloat(envio) || 0 : 0;
+    const instalacionValor = aplicarInstalacion ? parseFloat(instalacion) || 0 : 0;
+    const descuentoValor = aplicarDescuento ? parseFloat(descuento) || 0 : 0;
+
+    const totalConAjustes =
+        subtotalProductos + envioValor + instalacionValor - descuentoValor;
+
+    const totalGeneral = Math.round(totalConAjustes).toString();
+
+    const obtenerLogoBase64 = async () => {
+        const asset = Asset.fromModule(require('../assets/logo.png'));
+        await asset.downloadAsync();
+
+        if (Platform.OS === 'web') {
+            return asset.uri;
+        }
+
+        const base64 = await FileSystem.readAsStringAsync(asset.localUri, {
+            encoding: FileSystem.EncodingType.Base64,
+        });
+
+        return `data:image/png;base64,${base64}`;
+    };
 
     const abrirModal = (index) => {
         setFilaSeleccionada(index);
@@ -37,19 +104,16 @@ export default function FacturaScreen() {
         const nuevasFilas = [...filas];
 
         nuevasFilas[filaSeleccionada].cantidad = data.cantidad;
+        nuevasFilas[filaSeleccionada].referencia = data.referencia;
         nuevasFilas[filaSeleccionada].descripcion = data.descripcion;
         nuevasFilas[filaSeleccionada].precio = data.precio;
         nuevasFilas[filaSeleccionada].total = data.total;
+        nuevasFilas[filaSeleccionada].producto = data.producto;
+        nuevasFilas[filaSeleccionada].extrasSeleccionados = data.extrasSeleccionados;
+        nuevasFilas[filaSeleccionada].medidas = data.medidas;
 
         setFilas(nuevasFilas);
     };
-
-    const [fecha, setFecha] = useState(new Date());
-    const [mostrarCalendario, setMostrarCalendario] = useState(false);
-
-    const dia = String(fecha.getDate()).padStart(2, '0');
-    const mes = String(fecha.getMonth() + 1).padStart(2, '0');
-    const anio = String(fecha.getFullYear());
 
     const cambiarFecha = (event, selectedDate) => {
         setMostrarCalendario(false);
@@ -59,77 +123,131 @@ export default function FacturaScreen() {
         }
     };
 
-    const totalGeneral = filas
-        .reduce((total, fila) => {
-            const valor = parseFloat(fila.total) || 0;
-            return total + valor;
-        }, 0)
-        .toFixed(2);
+    const limpiarFactura = () => {
+        setCliente('');
+        setFilas(crearFilasVacias());
+        setFecha(new Date());
 
+        setAplicarEnvio(false);
+        setEnvio('');
+
+        setAplicarInstalacion(false);
+        setInstalacion('');
+
+        setAplicarDescuento(false);
+        setDescuento('');
+    };
+
+    const crearFacturaActual = () => ({
+        numeroRecibo,
+        cliente,
+        fecha: {
+            dia,
+            mes,
+            anio,
+        },
+        filas,
+        ajustes: {
+            subtotalProductos: subtotalProductos.toFixed(2),
+            envio: envioValor.toFixed(2),
+            instalacion: instalacionValor.toFixed(2),
+            descuento: descuentoValor.toFixed(2),
+        },
+        total: totalGeneral,
+    });
+
+    const mostrarToast = (mensaje) => {
+        setToastMessage(mensaje);
+        setToastVisible(true);
+
+        setTimeout(() => {
+            setToastVisible(false);
+        }, 2500);
+    };
 
     const guardarFacturaActual = async () => {
         try {
-
-            const factura = {
-                cliente,
-                fecha: {
-                    dia,
-                    mes,
-                    anio,
-                },
-                filas,
-                total: totalGeneral,
-            };
+            const factura = crearFacturaActual();
 
             const facturaGuardada = await guardarFactura(factura);
 
-            setNumeroRecibo(
-                String(facturaGuardada.numeroRecibo + 1).padStart(4, '0')
-            );
-
-            Alert.alert('Listo', 'Factura guardada correctamente');
-
-            setTimeout(() => {
-                setCliente('');
-
-                setFilas(
-                    Array.from({ length: 14 }).map(() => ({
-                        cantidad: '',
-                        referencia: '',
-                        descripcion: '',
-                        precio: '',
-                        total: '',
-                    }))
+            if (facturaGuardada?.numeroRecibo) {
+                setNumeroRecibo(
+                    String(Number(facturaGuardada.numeroRecibo) + 1).padStart(4, '0')
                 );
+            }
 
-                setFecha(new Date());
+            mostrarToast('Factura guardada correctamente');
 
-            }, 60000);
+            //limpiarFactura();
         } catch (error) {
-            Alert.alert('Error', 'No se pudo guardar la factura');
+            console.log(error);
+            mostrarToast('No se pudo guardar la factura');
+        }
+    };
+
+    const descargarPdf = async () => {
+        let ventanaPDF = null;
+
+        try {
+            if (Platform.OS === 'web') {
+                ventanaPDF = window.open('', '_blank');
+
+                if (!ventanaPDF) {
+                    Alert.alert(
+                        'Ventana bloqueada',
+                        'Permite ventanas emergentes para descargar el PDF.'
+                    );
+                    return;
+                }
+
+                ventanaPDF.document.write('<p>Generando PDF...</p>');
+            }
+
+            const facturaActual = crearFacturaActual();
+            const logoBase64 = await obtenerLogoBase64();
+
+            const uri = await generarPdfFactura(facturaActual, logoBase64, ventanaPDF);
+
+            if (uri) {
+                const disponible = await Sharing.isAvailableAsync();
+
+                if (disponible) {
+                    await Sharing.shareAsync(uri);
+                } else {
+                    Alert.alert('PDF creado', uri);
+                }
+            }
+        } catch (error) {
+            console.log(error);
+            Alert.alert('Error', 'No se pudo generar el PDF');
         }
     };
 
     const compartirFactura = async () => {
         try {
             const contenido = `
-                FACTURA
+FACTURA
 
-                Cliente: ${cliente}
+Cliente: ${cliente}
+Fecha: ${dia}/${mes}/${anio}
 
-                Fecha: ${dia}/${mes}/${anio}
-
-                Productos:
-                ${filas
-                    .filter((fila) => fila.descripcion)
+Productos:
+${filas
+                    .filter((fila) => fila.descripcion && fila.descripcion !== 'Tocar para agregar')
                     .map(
                         (fila, index) =>
                             `${index + 1}. Cant: ${fila.cantidad} | ${fila.descripcion} | Total: $${fila.total}`
                     )
                     .join('\n')}
 
-                TOTAL: $${totalGeneral}
-                `;
+Subtotal productos: $${subtotalProductos.toFixed(2)}
+Envío: $${envioValor.toFixed(2)}
+Instalación: $${instalacionValor.toFixed(2)}
+Descuento: -$${descuentoValor.toFixed(2)}
+
+TOTAL: $${totalGeneral}
+`;
 
             const file = new File(Paths.cache, `factura-${Date.now()}.txt`);
             file.create();
@@ -149,190 +267,380 @@ export default function FacturaScreen() {
         }
     };
 
+    useFocusEffect(
+        useCallback(() => {
+            cargarFacturaParaEditar();
+        }, [])
+    );
+
+    const cargarFacturaParaEditar = async () => {
+        const idEditar = await AsyncStorage.getItem('factura_editar_id');
+
+        if (!idEditar) return;
+
+        const facturasGuardadas = await obtenerFacturas();
+        const factura = facturasGuardadas.find((item) => item.id === idEditar);
+
+        if (!factura) return;
+
+        setNumeroRecibo(String(factura.numeroRecibo || ''));
+        setCliente(factura.cliente || '');
+        setFilas(factura.filas || crearFilasVacias());
+
+        setAplicarEnvio(Number(factura.ajustes?.envio || 0) > 0);
+        setEnvio(String(Number(factura.ajustes?.envio || 0) || ''));
+
+        setAplicarInstalacion(Number(factura.ajustes?.instalacion || 0) > 0);
+        setInstalacion(String(Number(factura.ajustes?.instalacion || 0) || ''));
+
+        setAplicarDescuento(Number(factura.ajustes?.descuento || 0) > 0);
+        setDescuento(String(Number(factura.ajustes?.descuento || 0) || ''));
+
+        await AsyncStorage.removeItem('factura_editar_id');
+    };
+
     return (
         <ScrollView style={styles.screen}>
-            <View style={styles.receipt}>
+            <View style={styles.pageLayout}>
+                <View style={styles.leftColumn}>
+                    <View style={styles.receipt}>
+                        <View style={styles.top}>
+                            <View style={styles.leftHeader}>
+                                <Image
+                                    source={require('../assets/logo.png')}
+                                    style={styles.logo}
+                                    resizeMode="contain"
+                                />
 
-                {/* ENCABEZADO */}
-                <View style={styles.top}>
-                    <View style={styles.leftHeader}>
-                        <Image
-                            source={require('../assets/logo.png')}
-                            style={styles.logo}
-                            resizeMode="contain"
-                        />
-
-                        <Text style={styles.address}>
-                            Calle Antigua a{'\n'}Zacatecoluca San Marcos
-                        </Text>
-                    </View>
-
-                    <View style={styles.rightHeader}>
-                        <Text style={styles.recibo}>RECIBO</Text>
-                        <TextInput
-                            style={styles.numero}
-                            value={numeroRecibo}
-                            onChangeText={setNumeroRecibo}
-                            keyboardType="numeric"
-                        />
-
-                        <Text style={styles.fechaTitle}>FECHA</Text>
-
-                        <Pressable onPress={() => setMostrarCalendario(true)}>
-                            <View style={styles.dateRow}>
-                                <View style={styles.dateBox}>
-                                    <Text style={styles.dateLabel}>DIA</Text>
-                                    <Text style={styles.dateText}>{dia}</Text>
-                                </View>
-
-                                <View style={styles.dateBox}>
-                                    <Text style={styles.dateLabel}>MES</Text>
-                                    <Text style={styles.dateText}>{mes}</Text>
-                                </View>
-
-                                <View style={styles.dateBox}>
-                                    <Text style={styles.dateLabel}>AÑO</Text>
-                                    <Text style={styles.dateText}>{anio}</Text>
-                                </View>
-                            </View>
-                        </Pressable>
-
-                        {mostrarCalendario && (
-                            <DateTimePicker
-                                value={fecha}
-                                mode="date"
-                                display="default"
-                                onChange={cambiarFecha}
-                            />
-                        )}
-
-                        <Text style={styles.phone}>Tel.: 2213-0460</Text>
-                        <Text style={styles.phone}>7406-8290</Text>
-                        <Text style={styles.phone}>Cel.: 7629-5889</Text>
-                    </View>
-                </View>
-
-                {/* CLIENTE */}
-                <View style={styles.clientRow}>
-                    <Text style={styles.clientLabel}>CLIENTE</Text>
-                    <TextInput style={styles.clientInput}
-                        value={cliente}
-                        onChangeText={setCliente} />
-                </View>
-
-                {/* TABLA */}
-                <View style={styles.table}>
-                    <View style={styles.tableHeader}>
-                        <Text style={[styles.th, styles.cant]}>CANT</Text>
-                        <Text style={[styles.th, styles.ref]}>REFERENCIA</Text>
-                        <Text style={[styles.th, styles.desc]}>DESCRIPCIÓN</Text>
-                        <Text style={[styles.th, styles.price]}>PRECIO</Text>
-                        <Text style={[styles.th, styles.total]}>TOTAL</Text>
-                    </View>
-
-                    {filas.map((fila, index) => (
-                        <View style={styles.tableRow} key={index}>
-                            <TextInput
-                                style={[styles.td, styles.cant]}
-                                value={fila.cantidad}
-                                onChangeText={(text) => {
-                                    const nuevasFilas = [...filas];
-                                    nuevasFilas[index].cantidad = text;
-                                    setFilas(nuevasFilas);
-                                }}
-                            />
-
-                            <TextInput
-                                style={[styles.td, styles.ref]}
-                                value={fila.referencia}
-                                onChangeText={(text) => {
-                                    const nuevasFilas = [...filas];
-                                    nuevasFilas[index].referencia = text;
-                                    setFilas(nuevasFilas);
-                                }}
-                            />
-
-                            <Pressable
-                                style={[styles.td, styles.desc]}
-                                onPress={() => abrirModal(index)}
-                            >
-                                <Text style={styles.descText}>
-                                    {fila.descripcion || 'Tocar para agregar'}
+                                <Text style={styles.address}>
+                                    Calle Antigua a{'\n'}Zacatecoluca San Marcos
                                 </Text>
-                            </Pressable>
+                            </View>
+
+                            <View style={styles.rightHeader}>
+                                <Text style={styles.recibo}>RECIBO</Text>
+
+                                <TextInput
+                                    style={styles.numero}
+                                    value={numeroRecibo}
+                                    onChangeText={setNumeroRecibo}
+                                    keyboardType="numeric"
+                                />
+
+                                <Text style={styles.fechaTitle}>FECHA</Text>
+
+                                <Pressable onPress={() => setMostrarCalendario(true)}>
+                                    <View style={styles.dateRow}>
+                                        <View style={styles.dateBox}>
+                                            <Text style={styles.dateLabel}>DIA</Text>
+                                            <Text style={styles.dateText}>{dia}</Text>
+                                        </View>
+
+                                        <View style={styles.dateBox}>
+                                            <Text style={styles.dateLabel}>MES</Text>
+                                            <Text style={styles.dateText}>{mes}</Text>
+                                        </View>
+
+                                        <View style={styles.dateBox}>
+                                            <Text style={styles.dateLabel}>AÑO</Text>
+                                            <Text style={styles.dateText}>{anio}</Text>
+                                        </View>
+                                    </View>
+                                </Pressable>
+
+                                {mostrarCalendario && (
+                                    <DateTimePicker
+                                        value={fecha}
+                                        mode="date"
+                                        display="default"
+                                        onChange={cambiarFecha}
+                                    />
+                                )}
+
+                                <Text style={styles.phone}>Tel.: 2213-0460</Text>
+                                <Text style={styles.phone}>7406-8290</Text>
+                                <Text style={styles.phone}>Cel.: 7629-5889</Text>
+                            </View>
+                        </View>
+
+                        <View style={styles.clientRow}>
+                            <Text style={styles.clientLabel}>CLIENTE</Text>
 
                             <TextInput
-                                style={[styles.td, styles.price]}
-                                value={fila.precio}
-                                keyboardType="numeric"
-                                onChangeText={(text) => {
-                                    const nuevasFilas = [...filas];
-                                    nuevasFilas[index].precio = text;
-                                    setFilas(nuevasFilas);
-                                }}
-                            />
-
-                            <TextInput
-                                style={[styles.td, styles.total]}
-                                value={fila.total}
-                                keyboardType="numeric"
-                                onChangeText={(text) => {
-                                    const nuevasFilas = [...filas];
-                                    nuevasFilas[index].total = text;
-                                    setFilas(nuevasFilas);
-                                }}
+                                style={styles.clientInput}
+                                value={cliente}
+                                onChangeText={setCliente}
                             />
                         </View>
 
+                        <View style={styles.table}>
+                            <View style={styles.tableHeader}>
+                                <Text style={[styles.th, styles.cant]}>CANT</Text>
+                                <Text style={[styles.th, styles.ref]}>REFERENCIA</Text>
+                                <Text style={[styles.th, styles.desc]}>DESCRIPCIÓN</Text>
+                                <Text style={[styles.th, styles.price]}>PRECIO</Text>
+                                <Text style={[styles.th, styles.total]}>TOTAL</Text>
+                            </View>
 
-                    ))}
+                            {filas.map((fila, index) => (
+                                <View style={styles.tableRow} key={index}>
+                                    <TextInput
+                                        style={[styles.td, styles.cant]}
+                                        value={fila.cantidad}
+                                        onChangeText={(text) => {
+                                            const nuevasFilas = [...filas];
+                                            nuevasFilas[index].cantidad = text;
+                                            setFilas(nuevasFilas);
+                                        }}
+                                    />
+
+                                    <TextInput
+                                        style={[styles.td, styles.ref]}
+                                        value={fila.referencia}
+                                        onChangeText={(text) => {
+                                            const nuevasFilas = [...filas];
+                                            nuevasFilas[index].referencia = text;
+                                            setFilas(nuevasFilas);
+                                        }}
+                                    />
+
+                                    <Pressable
+                                        style={[styles.td, styles.desc]}
+                                        onPress={() => abrirModal(index)}
+                                    >
+                                        <Text style={styles.descText}>
+                                            {fila.descripcion || 'Tocar para agregar'}
+                                        </Text>
+                                    </Pressable>
+
+                                    <TextInput
+                                        style={[styles.td, styles.price]}
+                                        value={fila.precio}
+                                        keyboardType="numeric"
+                                        onChangeText={(text) => {
+                                            const nuevasFilas = [...filas];
+                                            nuevasFilas[index].precio = text;
+                                            setFilas(nuevasFilas);
+                                        }}
+                                    />
+
+                                    <TextInput
+                                        style={[styles.td, styles.total]}
+                                        value={fila.total}
+                                        keyboardType="numeric"
+                                        onChangeText={(text) => {
+                                            const nuevasFilas = [...filas];
+                                            nuevasFilas[index].total = text;
+                                            setFilas(nuevasFilas);
+                                        }}
+                                    />
+                                </View>
+                            ))}
+                        </View>
+
+                        <View style={styles.bottom}>
+                            <View style={styles.sonBox}>
+                                <Text style={styles.son}>SON:</Text>
+                            </View>
+
+                            <View style={styles.totalBox}>
+                                <Text style={styles.totalLabel}>TOTAL</Text>
+                                <TextInput
+                                    style={styles.finalTotal}
+                                    value={`$${totalGeneral}`}
+                                    editable={false}
+                                />
+                            </View>
+                        </View>
+
+                        <DescripcionModal
+                            visible={modalVisible}
+                            onClose={() => setModalVisible(false)}
+                            onSave={guardarDescripcion}
+                            dataInicial={
+                                filaSeleccionada !== null ? filas[filaSeleccionada] : null
+                            }
+                        />
+                    </View>
                 </View>
 
-                {/* TOTAL FINAL */}
-                <View style={styles.bottom}>
-                    <View style={styles.sonBox}>
-                        <Text style={styles.son}>SON:</Text>
+                <View style={styles.rightColumn}>
+                    <View style={styles.ajustesBox}>
+                        <Text style={styles.ajustesTitle}>Ajustes opcionales</Text>
+
+                        <Pressable
+                            style={styles.checkRow}
+                            onPress={() => setAplicarEnvio(!aplicarEnvio)}
+                        >
+                            <Ionicons
+                                name={aplicarEnvio ? 'checkbox' : 'square-outline'}
+                                size={24}
+                                color="#0b376b"
+                            />
+                            <Text style={styles.checkText}>Agregar envío</Text>
+                        </Pressable>
+
+                        {aplicarEnvio && (
+                            <TextInput
+                                style={styles.ajusteInput}
+                                placeholder="Costo de envío"
+                                keyboardType="numeric"
+                                value={envio}
+                                onChangeText={setEnvio}
+                            />
+                        )}
+
+                        <Pressable
+                            style={styles.checkRow}
+                            onPress={() => setAplicarInstalacion(!aplicarInstalacion)}
+                        >
+                            <Ionicons
+                                name={aplicarInstalacion ? 'checkbox' : 'square-outline'}
+                                size={24}
+                                color="#0b376b"
+                            />
+                            <Text style={styles.checkText}>Agregar instalación</Text>
+                        </Pressable>
+
+                        {aplicarInstalacion && (
+                            <TextInput
+                                style={styles.ajusteInput}
+                                placeholder="Costo de instalación"
+                                keyboardType="numeric"
+                                value={instalacion}
+                                onChangeText={setInstalacion}
+                            />
+                        )}
+
+                        <Pressable
+                            style={styles.checkRow}
+                            onPress={() => setAplicarDescuento(!aplicarDescuento)}
+                        >
+                            <Ionicons
+                                name={aplicarDescuento ? 'checkbox' : 'square-outline'}
+                                size={24}
+                                color="#0b376b"
+                            />
+                            <Text style={styles.checkText}>Aplicar descuento</Text>
+                        </Pressable>
+
+                        {aplicarDescuento && (
+                            <TextInput
+                                style={styles.ajusteInput}
+                                placeholder="Descuento"
+                                keyboardType="numeric"
+                                value={descuento}
+                                onChangeText={setDescuento}
+                            />
+                        )}
+
+                        <View style={styles.resumenTotal}>
+                            <Text style={styles.resumenText}>
+                                Subtotal productos: ${subtotalProductos.toFixed(2)}
+                            </Text>
+
+                            <Text style={styles.resumenText}>
+                                Envío: ${envioValor.toFixed(2)}
+                            </Text>
+
+                            <Text style={styles.resumenText}>
+                                Instalación: ${instalacionValor.toFixed(2)}
+                            </Text>
+
+                            <Text style={styles.resumenText}>
+                                Descuento: -${descuentoValor.toFixed(2)}
+                            </Text>
+
+                            <Text style={styles.totalFinal}>Total final: ${totalGeneral}</Text>
+                        </View>
                     </View>
 
-                    <View style={styles.totalBox}>
-                        <Text style={styles.totalLabel}>TOTAL</Text>
-                        <TextInput style={styles.finalTotal} value={`$${totalGeneral}`} editable={false} />
+                    <View style={styles.actions}>
+                        <Pressable
+                            style={styles.saveInvoiceButton}
+                            onPress={guardarFacturaActual}
+                        >
+                            <Text style={styles.saveInvoiceText}>Guardar factura</Text>
+                        </Pressable>
+
+                        <Pressable style={styles.pdfInvoiceButton} onPress={descargarPdf}>
+                            <Text style={styles.pdfInvoiceText}>Descargar PDF</Text>
+                        </Pressable>
+
+                        <Pressable
+                            style={styles.shareInvoiceButton}
+                            onPress={compartirFactura}
+                        >
+                            <Text style={styles.shareInvoiceText}>Compartir factura</Text>
+                        </Pressable>
                     </View>
                 </View>
-
-                <DescripcionModal
-                    visible={modalVisible}
-                    onClose={() => setModalVisible(false)}
-                    onSave={guardarDescripcion}
-                />
-
             </View>
-            <View style={styles.actions}>
-                <Pressable
-                    style={styles.saveInvoiceButton}
-                    onPress={guardarFacturaActual}
-                >
-                    <Text style={styles.saveInvoiceText}>
-                        Guardar factura
-                    </Text>
-                </Pressable>
+            {toastVisible && (
+                <View style={styles.toast}>
+                    <Ionicons
+                        name="checkmark-circle"
+                        size={22}
+                        color="#fff"
+                    />
 
-                <Pressable
-                    style={styles.shareInvoiceButton}
-                    onPress={compartirFactura}
-                >
-                    <Text style={styles.shareInvoiceText}>
-                        Compartir factura
+                    <Text style={styles.toastText}>
+                        {toastMessage}
                     </Text>
-                </Pressable>
-            </View>
+                </View>
+            )}
         </ScrollView>
     );
 }
 
 const styles = StyleSheet.create({
+
+    toast: {
+        position: 'absolute',
+        bottom: 30,
+        alignSelf: 'center',
+        backgroundColor: '#0b376b',
+        paddingHorizontal: 18,
+        paddingVertical: 12,
+        borderRadius: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        elevation: 10,
+        shadowColor: '#000',
+        shadowOpacity: 0.2,
+        shadowRadius: 10,
+    },
+
+    toastText: {
+        color: '#fff',
+        fontWeight: 'bold',
+        fontSize: 15,
+    },
     screen: {
         backgroundColor: '#ddd',
+    },
+
+    pageLayout: {
+        width: '100%',
+        maxWidth: 1100,
+        alignSelf: 'center',
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'flex-start',
+        gap: 24,
+        padding: 20,
+        paddingBottom: 130,
+        flexWrap: 'wrap',
+    },
+
+    leftColumn: {
+        width: 430,
+    },
+
+    rightColumn: {
+        width: 360,
+        gap: 14,
     },
 
     descText: {
@@ -345,7 +653,6 @@ const styles = StyleSheet.create({
         minHeight: 680,
         backgroundColor: '#fff',
         alignSelf: 'center',
-        marginTop: 20,
         padding: 14,
         borderWidth: 1,
         borderColor: '#cfcfcf',
@@ -441,12 +748,6 @@ const styles = StyleSheet.create({
         paddingTop: 5,
     },
 
-    dateInput: {
-        height: 28,
-        textAlign: 'center',
-        padding: 0,
-    },
-
     phone: {
         fontSize: 12,
         color: '#d85c42',
@@ -530,7 +831,6 @@ const styles = StyleSheet.create({
 
     bottom: {
         flexDirection: 'row',
-        marginTop: 0,
         height: 34,
     },
 
@@ -568,15 +868,85 @@ const styles = StyleSheet.create({
         padding: 2,
     },
 
+    ajustesBox: {
+        width: '100%',
+        backgroundColor: '#fff',
+        padding: 14,
+        borderRadius: 10,
+        gap: 10,
+    },
+
+    ajustesTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#0b376b',
+        marginBottom: 6,
+    },
+
+    checkRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+
+    checkText: {
+        fontSize: 15,
+        fontWeight: 'bold',
+        color: '#0b376b',
+    },
+
+    ajusteInput: {
+        borderWidth: 1,
+        borderColor: '#aaa',
+        borderRadius: 8,
+        padding: 10,
+        fontSize: 15,
+    },
+
+    resumenTotal: {
+        borderTopWidth: 1,
+        borderTopColor: '#ddd',
+        paddingTop: 10,
+        gap: 4,
+    },
+
+    resumenText: {
+        color: '#333',
+        fontSize: 14,
+    },
+
+    totalFinal: {
+        marginTop: 6,
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#d85c42',
+    },
+
+    actions: {
+        width: '100%',
+        gap: 10,
+    },
+
     saveInvoiceButton: {
         backgroundColor: '#0b376b',
         padding: 14,
         borderRadius: 8,
-        marginTop: 18,
-        marginBottom: 35,
     },
 
     saveInvoiceText: {
+        color: '#fff',
+        fontWeight: 'bold',
+        textAlign: 'center',
+        fontSize: 16,
+    },
+
+    pdfInvoiceButton: {
+        backgroundColor: '#1e7db8',
+        padding: 14,
+        borderRadius: 8,
+    },
+
+    pdfInvoiceText: {
         color: '#fff',
         fontWeight: 'bold',
         textAlign: 'center',
@@ -587,8 +957,6 @@ const styles = StyleSheet.create({
         backgroundColor: '#d85c42',
         padding: 14,
         borderRadius: 8,
-        marginTop: 10,
-        marginBottom: 35,
     },
 
     shareInvoiceText: {
@@ -596,13 +964,5 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         textAlign: 'center',
         fontSize: 16,
-    },
-
-    actions: {
-        width: 430,
-        alignSelf: 'center',
-        marginTop: 12,
-        marginBottom: 30,
-        gap: 10,
     },
 });
