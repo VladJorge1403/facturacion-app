@@ -1,13 +1,13 @@
 import * as Print from 'expo-print';
 import { Platform } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
+
+import { apiRequest } from './api';
+import { hayInternet } from './networkService';
 
 const limpiar = (valor) => String(valor ?? '').replace(/undefined|null/g, '');
 
-export const generarPdfFactura = async (
-  factura,
-  logoBase64,
-  ventanaPDF = null
-) => {
+const crearHtmlFactura = (factura, logoBase64) => {
   const fecha = factura.fecha || {};
   const ajustes = factura.ajustes || {};
 
@@ -71,7 +71,7 @@ export const generarPdfFactura = async (
     }
   `;
 
-  const html = `
+  return `
   <!DOCTYPE html>
   <html>
     <head>
@@ -329,6 +329,14 @@ export const generarPdfFactura = async (
     </body>
   </html>
   `;
+};
+
+export const generarPdfFactura = async (
+  factura,
+  logoBase64,
+  ventanaPDF = null
+) => {
+  const html = crearHtmlFactura(factura, logoBase64);
 
   if (Platform.OS === 'web') {
     const ventana = ventanaPDF || window.open('', '_blank');
@@ -351,5 +359,68 @@ export const generarPdfFactura = async (
   }
 
   const archivo = await Print.printToFileAsync({ html });
+
   return archivo.uri;
+};
+
+export const generarPdfBase64 = async (factura, logoBase64) => {
+  if (Platform.OS === 'web') {
+    return null;
+  }
+
+  const html = crearHtmlFactura(factura, logoBase64);
+
+  const archivo = await Print.printToFileAsync({
+    html,
+    base64: true,
+  });
+
+  return archivo.base64;
+};
+
+export const subirPdfFactura = async (factura, logoBase64) => {
+  const online = await hayInternet();
+
+  if (!online) {
+    return {
+      pdfUrl: null,
+      subida: false,
+      mensaje: 'Sin internet, PDF no subido',
+    };
+  }
+
+  const nombreArchivo = `facturas/factura-${factura.numeroRecibo || factura.id || Date.now()}.pdf`;
+
+  let pdfBase64 = null;
+
+  if (Platform.OS === 'web') {
+    return {
+      pdfUrl: null,
+      subida: false,
+      mensaje: 'Subida directa desde web pendiente. Usar Lambda con HTML o formulario.',
+    };
+  } else {
+    pdfBase64 = await generarPdfBase64(factura, logoBase64);
+  }
+
+  const respuesta = await apiRequest('/pdf', {
+    method: 'POST',
+    body: JSON.stringify({
+      nombreArchivo,
+      pdfBase64,
+      facturaId: factura.id,
+      numeroRecibo: factura.numeroRecibo,
+      contentType: 'application/pdf',
+    }),
+  });
+
+  const data =
+    typeof respuesta?.body === 'string'
+      ? JSON.parse(respuesta.body)
+      : respuesta;
+
+  return {
+    pdfUrl: data?.pdfUrl || null,
+    subida: !!data?.pdfUrl,
+  };
 };
